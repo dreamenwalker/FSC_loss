@@ -1,0 +1,116 @@
+mode: train
+model_name: deep_hit
+name: TranSMS_loss
+dataset_name: metabric
+load: false
+pretrained: ''
+
+##Train
+train:
+  batch_size: 64 # default is 64
+  epochs: 100
+  grad_accum_step: 1
+  log_dir: log_test
+  num_gpus: 1
+  num_workers: 8
+  optimizer:
+    lr: 0.001
+    momentum: 0.95
+    type: AdamW
+    weight_decay: 0.08
+  save_dir: model/
+  scheduler:
+    gamma: 0.1
+    milestones: #if epoch reach the number  in milestones, the strategy would be used to adjust the lr
+    - 10
+    - 20
+    - 40
+    - 60
+    - 80
+    min: 5.5e-06
+    step: 300
+    type: cosine
+    warmup:
+      start: 0.1
+      steps: 50
+      type: linear
+
+
+loss:
+  calibration:
+    Kbins: 50
+    flag: true
+    gamma: 2.0
+    nbins: 5
+  likelihood:
+    Kbins: 50
+    flag: true
+    gamma: 0.5
+  partial_likelihood:
+    flag: false
+    gamma: 1.0
+    mode: breslow
+  rank:
+    flag: true
+    gamma: 1.0
+    sigma: 1.0
+  self_rank:
+    flag: false
+    gamma: 1.0
+    scale: 0.8
+    sigma: 2.0
+
+network:
+  swinir:
+    window_size: 8
+    depths: [6, 6, 6, 6]
+    num_heads: [6, 6, 6, 6]
+    upscale: 4
+  deep_cox:
+    act_layer: relu
+    dropout_rate: 0.2
+    hidden_sizes:
+    - 32
+    - 32
+    - 64
+    num_cat_bins: 1
+    out_layer: tanh
+  deep_cox_hazard:
+    act_layer: relu
+    dropout_rate: 0.2
+    hidden_sizes:
+    - 32
+    - 32
+    - 64
+    num_cat_bins: 50
+    out_layer: tanh
+  deep_hit:
+    act_layer: relu
+    dropout_rate: 0.4
+    hidden_sizes:
+    - 32
+    - 32
+    - 64
+    num_cat_bins: 50
+    out_layer: softmax
+  deep_mtlr:
+    act_layer: relu
+    dropout_rate: 0.2
+    hidden_sizes:
+    - 32
+    - 32
+    - 64
+    num_cat_bins: 50
+    out_layer: softmax
+
+
+data:
+  bidding:
+    data_root: BIDDING
+    root_dir: /home/admin/workspace/SkinCancer/Code/TripleSurv_zlz/new_promgram/data/
+  metabric:
+    dataset: METABRIC
+    root_dir: /home/admin/workspace/SkinCancer/Code/TripleSurv_zlz/new_promgram/data/
+  support:
+    dataset: SUPPORT
+    image_root: /mnt/workspace/SkinCancer/Code/derm7pt_classifier/data/private_data

@@ -1,0 +1,40 @@
+// Not total the same as SRResNet in <Photo-Realistic Single Image Super-Resolution Using a Generative Adversarial Network>
+// With 16 Residual blocks w/o BN
+{
+  "config_scafactor2": {"inChannel": 2,
+   "outChannel": 2, 
+   "initialConvFeatures": 24,
+    "scaleFactor": 2, 
+    "rdn_nb_of_features": 24, 
+    "rdn_nb_of_blocks": 4, 
+    "rdn_layer_in_each_block": 5, 
+    "rdn_growth_rate": 6, 
+    "img_size1": n1 
+    // 2, "img_size2": n2 // 2, "cvt_out_channels": 64, "cvt_dim": 64, "num_attention_heads": 8, "convAfterConcatLayerFeatures": 48}
+         },
+        
+    "config_scafactor4": {"inChannel": 2, 
+        "outChannel": 2,
+         "initialConvFeatures": 24,
+          "scaleFactor": 4,
+           "rdn_nb_of_features": 24, 
+           "rdn_nb_of_blocks": 4, 
+           "rdn_layer_in_each_block": 8, 
+           "rdn_growth_rate": 6, 
+           "img_size1": n1 
+           // 4, "img_size2": n2 // 4, "cvt_out_channels": 64, "cvt_dim": 64, 
+           //"num_attention_heads": 8, "convAfterConcatLayerFeatures": 48}
+        },   
+        
+      "config_scafactor8": {"inChannel": 2, 
+        "outChannel": 2, 
+        "initialConvFeatures": 64, 
+        "scaleFactor": 8, 
+        "rdn_nb_of_features": 24, 
+        "rdn_nb_of_blocks": 4, 
+        "rdn_layer_in_each_block": 9,
+         "rdn_growth_rate": 6,
+          "img_size1": n1 // 8, "img_size2": n2 // 8, "cvt_out_channels": 64, "cvt_dim": 64, "num_attention_heads": 8, "convAfterConcatLayerFeatures": 48}
+             }
+}
+

@@ -1,0 +1,31 @@
+mode: train
+model_name: deep_hit
+name: R38SM520
+dataset_name: metabric
+load: false
+pretrained: ''
+
+##Train
+train:
+  batch_size: 64 # default is 64
+  epochs: 200
+  grad_accum_step: 1
+  log_dir: log_test
+  num_gpus: 1
+  num_workers: 8
+  optimizer:
+    lr: 0.0002 #4e-5
+    momentum: 0.95
+    type: AdamW
+    weight_decay: 0.001
+  save_dir: model/
+  scheduler:
+    gamma: 0.1
+    milestones: [10, 20, 40, 60, 80] #if epoch reach the number  in milestones, the strategy would be used to adjust the lr
+    min: 5.5e-11
+    step: 200
+    type: cosine
+    warmup:
+      start: 0.01
+      steps: 20
+      type: linear

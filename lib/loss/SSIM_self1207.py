@@ -1,0 +1,332 @@
+
+import torch
+import torch.nn.functional as F
+import torch.nn as nn
+from math import exp
+import numpy as np
+
+# 2023524
+# https://blog.csdn.net/weixin_43135178/article/details/120865709 切比雪夫 损失函数
+
+
+class L1_Charbonnier_loss(torch.nn.Module):
+    """L1 Charbonnierloss."""
+
+    def __init__(self):
+        super(L1_Charbonnier_loss, self).__init__()
+        self.eps = 1e-5
+
+    def forward(self, X, Y):
+        diff = torch.add(X, -Y)
+        error = torch.sqrt(diff * diff + self.eps)
+        loss = torch.mean(error)
+        return loss
+
+
+# %%%#############type 2 #########https://blog.csdn.net/hyk_1996/article/details/87867285
+# 直接定义函数 ， 不需要维护参数，梯度等信息
+# 注意所有的数学操作需要使用tensor完成。
+def my_mse_loss(x, y, k=2):
+    return torch.mean(torch.pow((x - y), k))
+# 计算一维的高斯分布向量
+def gaussian(window_size, sigma):
+    gauss = torch.Tensor([exp(-(x - window_size // 2) ** 2 / float(2 * sigma ** 2)) for x in range(window_size)])
+    return gauss / gauss.sum()
+
+'''
+gaussian(12, 1.1)
+Out[19]: 
+tensor([1.2559e-07, 1.1831e-05, 4.8770e-04, 8.7978e-03, 6.9450e-02, 2.3991e-01,
+        3.6267e-01, 2.3991e-01, 6.9450e-02, 8.7978e-03, 4.8770e-04, 1.1831e-05])
+'''
+# 创建高斯核，通过两个一维高斯分布向量进行矩阵乘法得到
+# 可以设定channel参数拓展为3通道
+def create_window(window_size, channel=2):
+    _1D_window = gaussian(window_size, 1.5).unsqueeze(1)
+    _2D_window = _1D_window.mm(_1D_window.t()).float().unsqueeze(0).unsqueeze(0)
+    window = _2D_window.expand(channel, 1, window_size, window_size).contiguous()
+    return window
+
+
+# 计算SSIM
+# 直接使用SSIM的公式，但是在计算均值时，不是直接求像素平均值，而是采用归一化的高斯核卷积来代替。
+# 在计算方差和协方差时用到了公式Var(X)=E[X^2]-E[X]^2, cov(X,Y)=E[XY]-E[X]E[Y].
+# 正如前面提到的，上面求期望的操作采用高斯核卷积代替。
+def ssim(img1, img2, window_size=11, window=None, size_average=True, full=False, val_range=None):
+    # Value range can be different from 255. Other common ranges are 1 (sigmoid) and 2 (tanh).
+    if val_range is None:
+        if torch.max(img1) > 128:
+            max_val = 255
+        else:
+            max_val = 1
+
+        if torch.min(img1) < -0.5:
+            min_val = -1
+        else:
+            min_val = 0
+        L = max_val - min_val
+    else:
+        L = val_range
+
+    padd = 0
+    (_, channel, height, width) = img1.size()
+    if window is None:
+        real_size = min(window_size, height, width)
+        window = create_window(real_size, channel=channel).to(img1.device)
+
+    mu1 = F.conv2d(img1, window, padding=padd, groups=channel)
+    mu2 = F.conv2d(img2, window, padding=padd, groups=channel)
+    mu1 = torch.mean(img1)
+    mu2 = torch.mean(img2)
+    mu1_sq = mu1.pow(2)
+    mu2_sq = mu2.pow(2)
+    mu1_mu2 = mu1 * mu2
+
+    sigma1_sq = F.conv2d(img1 * img1, window, padding=padd, groups=channel) - mu1_sq # E(x^2)-E(x)^2  mu1_sq is E(x)
+    sigma2_sq = F.conv2d(img2 * img2, window, padding=padd, groups=channel) - mu2_sq
+    sigma12 = F.conv2d(img1 * img2, window, padding=padd, groups=channel) - mu1_mu2
+
+    C1 = (0.01 * L) ** 2
+    C2 = (0.03 * L) ** 2
+
+    v1 = 2.0 * sigma12 + C2
+    v2 = sigma1_sq + sigma2_sq + C2
+    cs = torch.mean(v1 / v2)  # contrast sensitivity
+
+    ssim_map = ((2 * mu1_mu2 + C1) * v1) / ((mu1_sq + mu2_sq + C1) * v2)# bad code，difficult know what The mu is，易读性差
+
+    if size_average:
+        ret = ssim_map.mean()
+    else:
+        ret = ssim_map.mean(1).mean(1).mean(1) #each channel perform operation of mean()
+
+    if full:
+        return ret, cs
+    return ret
+
+    
+#%%    
+# Classes to re-use window
+class SSIM_ori(torch.nn.Module):
+    def __init__(self, window_size=16, size_average=True, val_range=None):
+        super(SSIM_ori, self).__init__()
+        self.window_size = window_size
+        self.size_average = size_average
+        self.val_range = val_range
+
+        # Assume 1 channel for SSIM
+        self.channel = 1
+        self.window = create_window(window_size)
+
+    def forward(self, img1, img2):
+        (_, channel, _, _) = img1.size()
+
+        if channel == self.channel and self.window.dtype == img1.dtype:
+            window = self.window
+        else:
+            window = create_window(self.window_size, channel).to(img1.device).type(img1.dtype)
+            self.window = window
+            self.channel = channel
+
+        return 1-ssim(img1, img2, window=window, window_size=self.window_size, size_average=self.size_average)
+    #%%%%%%%%%%%
+
+##%%%%%% for L1 %%%%% #########
+class SSIM_L1_Plus(torch.nn.Module):
+    def __init__(self, alpha=1, beta=1):
+        super(SSIM_L1_Plus, self).__init__()
+        self.alpha = alpha
+        self.beta = beta
+        self.ssim =SSIM_ori()
+    def forward(self, input, target):
+        l1_loss = nn.L1Loss()
+        l1_loss = l1_loss(input, target)
+        ssim_loss = self.ssim(input, target)
+
+        weighted_loss = self.alpha * l1_loss + self.beta * ssim_loss
+
+        return weighted_loss
+
+class SSIM_L1_Pro(torch.nn.Module):
+    def __init__(self, alpha=5, beta=1):
+        super(SSIM_L1_Pro, self).__init__()
+        self.alpha = alpha
+        self.beta = beta
+        self.ssim =SSIM_ori()
+    def forward(self, input, target):
+        l1_loss = F.l1_loss(input, target)
+        ssim_loss = self.ssim(input,target)
+
+        Product = self.alpha * l1_loss * ssim_loss
+
+        return Product
+#####%%%%%% for MSE %%%%% #########
+class SSIM_MSE_Plus(torch.nn.Module):
+    def __init__(self, alpha=1, beta=1, sigma=2):
+        super(SSIM_MSE_Plus, self).__init__()
+        self.alpha = alpha
+        self.beta = beta
+        self.sigma = sigma
+        self.ssim =SSIM_ori()
+    def forward(self, input, target):
+        mse_loss1 = nn.MSELoss()
+        MSE_loss1 = mse_loss1(input, target)
+        ssim_loss = self.ssim(input,target)
+
+        weighted_loss = self.alpha * MSE_loss1 + self.beta * ssim_loss
+        weighted_loss = self.sigma * torch.exp(self.alpha * MSE_loss1 + self.beta * ssim_loss)
+        return weighted_loss
+
+class SSIM_MSE_Pro(torch.nn.Module):
+    def __init__(self, alpha=1, beta=1, scale = 2):
+        super(SSIM_MSE_Pro, self).__init__()
+        self.alpha = alpha
+        self.beta = beta
+        self.scale = scale
+        self.ssim =SSIM_ori()
+    def forward(self, input, target):
+        mse_loss = nn.MSELoss()
+        MSE_loss = mse_loss(input, target)
+        ssim_loss = self.ssim(input,target)
+
+        Product = self.scale*torch.exp(MSE_loss * ssim_loss)
+        #Product = self.scale*(MSE_loss * ssim_loss)
+
+        return Product
+    
+    
+class SSMI_luminance(torch.nn.Module):
+    def __init__(self, alpha=1, beta=1, scale=1):  # alpha keyi shezhixiaodian
+        super(SSMI_luminance, self).__init__()
+        self.alpha = alpha
+        self.beta = beta
+        self.scale = scale
+        self.ssim = SSIM_ori()
+
+#%% self define
+def ssim_eachItem(img1, img2, window_size=11, window=None, size_average=True, useeachItem=True, val_range=None): #useeachitem is fenbie return lumin structure constrast
+    # Value range can be different from 255. Other common ranges are 1 (sigmoid) and 2 (tanh).
+    if val_range is None:
+        if torch.max(img1) > 128:
+            max_val = 255
+        else:
+            max_val = 1
+
+        if torch.min(img1) < -0.5:
+            min_val = -1
+        else:
+            min_val = 0
+        L = max_val - min_val
+    else:
+        L = val_range
+
+    padd = 0
+    (_, channel, height, width) = img1.size()
+    if window is None:
+        real_size = min(window_size, height, width)
+        window = create_window(real_size, channel=channel).to(img1.device)
+
+    mu1 = F.conv2d(img1, window, padding=padd, groups=channel)
+    mu2 = F.conv2d(img2, window, padding=padd, groups=channel)
+    #way2
+    mu1 = torch.mean(img1)
+    mu2 = torch.mean(img2)
+    mu1_sq = mu1.pow(2)
+    mu2_sq = mu2.pow(2)
+    mu1_mu2 = mu1 * mu2
+
+    # E(x^2)-E(x)^2  mu1_sq is E(x)
+    sigma1_sq = F.conv2d(img1 * img1, window, padding=padd,
+                         groups=channel) - mu1_sq
+    sigma1_sq[sigma1_sq<0]=0
+    sigma1 = torch.sqrt(sigma1_sq)
+    
+    sigma2_sq = F.conv2d(img2 * img2, window, padding=padd,
+                         groups=channel) - mu2_sq
+    sigma2_sq[sigma2_sq<0]=0
+    sigma2 = torch.sqrt(sigma2_sq)
+    
+    sigma12 = F.conv2d(img1 * img2, window, padding=padd,
+                       groups=channel) - mu1_mu2
+    
+    #way2
+    sigma1_sq = torch.var(img1)
+    sigma1 = torch.sqrt(sigma1_sq)
+    sigma2_sq = torch.var(img2)
+    sigma2 = torch.sqrt(sigma2_sq)
+    sigma12 = torch.var(img1 * img2)
+    # orging is 0.01 0.03
+    C1 = (0.1 * L) ** 2
+    C2 = (0.3 * L) ** 2
+    
+    C3 = C2/2
+
+    v1 = 2.0 * sigma12 + C2
+    v2 = sigma1_sq + sigma2_sq + C2 
+    
+    lumin = torch.mean((2 * mu1_mu2 + C1) / \
+        (mu1_sq+mu2_sq + C1)) # luminance item1
+    
+    cs = torch.mean(v1 / v2)  # contrast sensitivity
+
+    struc = torch.mean((sigma12 + C3)/(torch.sqrt(sigma1_sq * sigma2_sq) + C3))
+    
+    Exloss = torch.exp(torch.mean(torch.pow(mu1 - mu2,2) / (mu1_sq+mu2_sq + C1)))
+    struclossCov = torch.exp(torch.mean(torch.pow(((sigma1 * sigma2) - sigma12),2) / (mu1_sq + mu2_sq + C1))) # denore include covariance
+    strucloss = torch.exp(torch.mean(torch.pow(sigma1 - sigma2,2) / (sigma1_sq + sigma2_sq + C2)))
+    ssim_map = ((2 * mu1_mu2 + C1) * v1) / ((mu1_sq + mu2_sq + C1)* v2)  # bad code，difficult know what The mu is，易读性差
+
+    if size_average:
+        ret = ssim_map.mean()
+    else:
+        # each channel perform operation of mean()
+        ret = ssim_map.mean(1).mean(1).mean(1)
+
+    if useeachItem:
+        return Exloss, struclossCov, strucloss
+    return ret
+# %%t 创新提出自己的
+# each element is plus not product 2023925 里面的亮度，等进行求和不是相乘
+
+
+class SSIM_ori_self2(torch.nn.Module):
+    def __init__(self, window_size=11, size_average=True, val_range=None,useeachitem = True,type = "None",onlychar = False):
+        super(SSIM_ori_self2, self).__init__()
+        self.window_size = window_size
+        self.size_average = size_average
+        self.val_range = val_range
+        self.useeachitem = useeachitem
+        self.eps = 1e-5
+        # Assume 1 channel for SSIM
+        self.channel = 1
+        self.window = create_window(window_size)
+        self.L1_Char = L1_Charbonnier_loss()
+        self.type = type
+        self.onlychar = onlychar
+        ##self.Struct = 
+    def forward(self, img1, img2):
+        (_, channel, _, _) = img1.size()
+
+        if channel == self.channel and self.window.dtype == img1.dtype:
+            window = self.window
+        else:
+            window = create_window(self.window_size, channel).to(
+                img1.device).type(img1.dtype)
+            self.window = window
+            self.channel = channel
+        Exloss, structlossCov, structloss = ssim_eachItem(img1, img2, window=window, window_size=self.window_size,
+                         size_average=self.size_average, useeachItem=self.useeachitem)
+        prod = F.l1_loss (img1,img2)
+        SSIM_selfCov = Exloss * structlossCov
+        SSIM_self = Exloss * structloss
+        #self_L1_charbproduct_Struct = torch.mul(prod,structloss)
+        self_L1_charbproduct_Struct = torch.mul(prod,SSIM_self)
+        self_L1_charbadd_Struct = torch.add(prod,structloss)
+        assert str(self_L1_charbadd_Struct) != 'nan', f'loss has nan value of {self_L1_charbadd_Struct}'
+        if self.type == "add":
+            return  self_L1_charbadd_Struct
+            print ('use self_L1_charbadd_Struct')
+        if self.onlychar:
+            #print ("the L1_char is used")
+            return prod
+        return self_L1_charbproduct_Struct
