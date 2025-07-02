@@ -9,7 +9,6 @@ We acknowledge the work of TranSMS [1]. Some of our code is inspired by the Tran
   volume={},
   number={},
   pages={1-1},
-  keywords={Image reconstruction;Magnetic field measurement;Frequency measurement;Particle measurements;Loss measurement;Atmospheric measurements;Time measurement;Power capacitors;Transformers;Training;Magnetic particle imaging;signal matrix;transformer;signal measurement},
   doi={10.1109/TIM.2025.3584127}}
 
 Reference
